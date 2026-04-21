@@ -1,0 +1,37 @@
+[
+  {
+    "name": "dev",
+    "serverName": "localhost",
+    "databaseName": "MyAppDb_Dev",
+    "port": 1433,
+    "authMode": "sql",
+    "username": "readonly_user",
+    "password": "${secret:DEV_SQL_PASSWORD}",
+    "trustServerCertificate": true,
+    "encrypt": false
+  },
+  {
+    "name": "staging",
+    "serverName": "staging-sql.company.internal",
+    "databaseName": "MyAppDb_Staging",
+    "port": 1433,
+    "authMode": "sql",
+    "username": "readonly_user",
+    "password": "${secret:STAGING_SQL_PASSWORD}",
+    "trustServerCertificate": false,
+    "encrypt": true,
+    "allowedSchemas": ["dbo", "app"],
+    "deniedSchemas":  ["audit", "internal"]
+  },
+  {
+    "name": "prod",
+    "serverName": "prod-sql.company.internal",
+    "databaseName": "MyAppDb",
+    "port": 1433,
+    "authMode": "windows",
+    "trustServerCertificate": false,
+    "encrypt": true,
+    "allowedSchemas": ["dbo"],
+    "deniedTools":    ["profile_table"]
+  }
+]
