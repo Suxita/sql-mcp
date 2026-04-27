@@ -1,0 +1,35 @@
+services:
+
+  # ── HTTP mode: one container serving BOTH environments ─────────────────────
+  # MCP clients connect via:
+  #   { "type": "http", "url": "http://mcp-server.hq.tbc:8080/mcp" }
+  #
+  # The active environment is whichever is first in environments.json.
+  # To query the other DB, pass "environment": "AlterSoft" in tool args.
+  sql-mcp:
+    build: .
+    image: sql-mcp:1.0.0
+    container_name: sql-mcp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      MCP_TRANSPORT:            http
+      MCP_PORT:                 "8080"
+      ENVIRONMENTS_CONFIG_PATH: /app/config/environments.json
+      # These are expanded by the app's ${secret:…} resolver at startup
+      BANK2000_SQL_PASSWORD:    ${BANK2000_SQL_PASSWORD}
+      ALTERSOFT_SQL_PASSWORD:   ${ALTERSOFT_SQL_PASSWORD}
+      AUDIT_LOG_PATH:           /app/logs/audit.jsonl
+    volumes:
+      - ./src/main/resources/example.json:/app/config/environments.json:ro
+      - mcp-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mcp-logs:
+

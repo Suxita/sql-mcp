@@ -1,0 +1,46 @@
+{
+  "TBC-mssql-mcp": {
+    "type": "stdio",
+
+    "command_local_dev": "mvn",
+    "args_local_dev": [
+      "exec:java",
+      "-Dexec.mainClass=ge.tbc.ms_mcp.McpReaderServer"
+    ],
+
+    "command": "docker",
+    "args": [
+      "run", "--rm", "-i",
+      "-e", "ENVIRONMENTS_CONFIG_PATH=/app/config/environments.json",
+      "-e", "BANK2000_SQL_PASSWORD",
+      "-e", "ALTERSOFT_SQL_PASSWORD",
+      "-v", "${workspaceFolder}/src/main/resources/example.json:/app/config/environments.json:ro",
+      "sql-mcp:1.0.0"
+    ],
+
+    "servers": [
+      {
+        "name": "Bank2000",
+        "serverName": "q12-sql-01.hq.tbc",
+        "databaseName": "Bank2000",
+        "port": 2020,
+        "authMode": "sql",
+        "username": "USR_Automation",
+        "password": "${secret:BANK2000_SQL_PASSWORD}",
+        "encrypt": true,
+        "trustServerCertificate": true
+      },
+      {
+        "name": "AlterSoft",
+        "serverName": "q12-sql-01.hq.tbc",
+        "databaseName": "AlterSoft",
+        "port": 17155,
+        "authMode": "sql",
+        "username": "USR_Automation",
+        "password": "${secret:ALTERSOFT_SQL_PASSWORD}",
+        "encrypt": true,
+        "trustServerCertificate": true
+      }
+    ]
+  }
+}

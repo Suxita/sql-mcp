@@ -1,40 +1,21 @@
 package ge.tbc.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import ge.tbc.connection.ConnectionManager;
+import ge.tbc.filter.Filter;
 import ge.tbc.model.McpProtocol.ToolCallResult;
 import ge.tbc.model.McpProtocol.ToolDefinition;
 
 import java.sql.*;
 import java.util.*;
-import java.util.regex.Pattern;
 
-/**
- * Data-querying tools (strictly read-only).
- *
- * Tools implemented:
- *   5.  read_data     – execute a SELECT query with row limit enforcement
- *   6.  explain_query – return the estimated execution plan for a query
- */
+
 public class DataTools {
 
-    /**
-     * Regex that matches any DML/DDL keyword at the start of a statement.
-     * Used to reject non-SELECT queries at the application layer, in addition
-     * to relying on a read-only DB user at the infrastructure layer.
-     */
-    private static final Pattern WRITE_PATTERN = Pattern.compile(
-            "(?i)^\\s*(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|CREATE|ALTER|EXEC|EXECUTE|sp_)",
-            Pattern.MULTILINE);
-
-    private static final int DEFAULT_LIMIT = 500;
     private static final int MAX_LIMIT     = 5_000;
 
-    private final ConnectionManager cm;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public DataTools(ConnectionManager cm) {
-        this.cm = cm;
+    public DataTools() {
     }
 
     public List<ToolDefinition> definitions() {
@@ -47,7 +28,7 @@ public class DataTools {
                                 "properties", Map.of(
                                         "query",       strProp("A SELECT SQL statement"),
                                         "environment", strProp("Named environment to query (optional, uses active)"),
-                                        "limit",       intProp("Max rows to return (default: " + DEFAULT_LIMIT + ", max: " + MAX_LIMIT + ")")
+                                        "limit",       intProp()
                                 ),
                                 "required", List.of("query")
                         )),
@@ -57,7 +38,8 @@ public class DataTools {
                         Map.of(
                                 "type", "object",
                                 "properties", Map.of(
-                                        "query", strProp("A SELECT SQL statement to analyse")
+                                        "query",       strProp("A SELECT SQL statement to analyse"),
+                                        "environment", strProp("Named environment (optional, uses active)")
                                 ),
                                 "required", List.of("query")
                         ))
@@ -68,7 +50,7 @@ public class DataTools {
         return switch (toolName) {
             case "read_data"     -> readData(args);
             case "explain_query" -> explainQuery(args);
-            default -> ToolCallResult.error("Unknown data tool: " + toolName);
+            default -> ToolCallResult.error("Unknown tool: " + toolName);
         };
     }
 
@@ -77,51 +59,20 @@ public class DataTools {
     // ------------------------------------------------------------------ //
 
     private ToolCallResult readData(Map<String, Object> args) {
-        String query = str(args, "query");
+        String query = str(args);
         if (query == null || query.isBlank()) {
             return ToolCallResult.error("'query' parameter is required.");
         }
-        if (WRITE_PATTERN.matcher(query).find()) {
-            return ToolCallResult.error(
-                    "read_data only accepts SELECT statements. " +
-                            "Detected a write or DDL keyword. No operation was performed.");
-        }
+        String rejection = Filter.validate(query);
+        return ToolCallResult.error(rejection);
 
-        int limit = Math.min(intArg(args, "limit", DEFAULT_LIMIT), MAX_LIMIT);
-
-        // Inject TOP clause if not already present (SQL Server syntax)
-        String safeQuery = injectTop(query.trim(), limit);
-
-        try (Connection conn = cm.openConnection();
-             Statement st = conn.createStatement()) {
-            st.setMaxRows(limit);
-            long start = System.currentTimeMillis();
-            ResultSet rs = st.executeQuery(safeQuery);
-            List<Map<String, Object>> rows = resultSetToList(rs, limit);
-            long elapsed = System.currentTimeMillis() - start;
-
-            return ToolCallResult.text(toJson(Map.of(
-                    "rowCount",  rows.size(),
-                    "limited",   rows.size() == limit,
-                    "durationMs", elapsed,
-                    "rows",      rows
-            )));
-        } catch (Exception e) {
-            return ToolCallResult.error("read_data failed: " + e.getMessage());
-        }
     }
 
-    /**
-     * If the query doesn't already have a TOP clause, inject one so we
-     * never accidentally stream millions of rows.
-     */
+
     private String injectTop(String query, int limit) {
         String upper = query.toUpperCase();
-        // Already has TOP or FETCH NEXT – leave as-is
         if (upper.contains("TOP ") || upper.contains("FETCH NEXT")) return query;
-        // Insert TOP after SELECT (handles SELECT DISTINCT, SELECT ALL etc.)
-        return query.replaceFirst("(?i)^(\\s*SELECT)(\\s+DISTINCT|\\s+ALL)?",
-                "$1$2 TOP " + limit);
+        return query.replaceFirst("(?i)^(\\s*SELECT)(\\s+DISTINCT|\\s+ALL)?", "$1$2 TOP " + limit);
     }
 
     // ------------------------------------------------------------------ //
@@ -129,32 +80,17 @@ public class DataTools {
     // ------------------------------------------------------------------ //
 
     private ToolCallResult explainQuery(Map<String, Object> args) {
-        String query = str(args, "query");
+        String query = str(args);
         if (query == null || query.isBlank()) {
             return ToolCallResult.error("'query' parameter is required.");
         }
-        if (WRITE_PATTERN.matcher(query).find()) {
-            return ToolCallResult.error("explain_query only accepts SELECT statements.");
-        }
+        String rejection = Filter.validate(query);
+        return ToolCallResult.error(rejection);
 
-        try (Connection conn = cm.openConnection();
-             Statement st = conn.createStatement()) {
-            // Estimated plan – does NOT execute the query
-            st.execute("SET SHOWPLAN_ALL ON");
-            List<Map<String, Object>> plan;
-            try (ResultSet rs = st.executeQuery(query)) {
-                plan = resultSetToList(rs, 1000);
-            } finally {
-                st.execute("SET SHOWPLAN_ALL OFF");
-            }
-            return ToolCallResult.text(toJson(Map.of("estimatedPlan", plan)));
-        } catch (Exception e) {
-            return ToolCallResult.error("explain_query failed: " + e.getMessage());
-        }
     }
 
     // ------------------------------------------------------------------ //
-    //  Shared helpers                                                      //
+    //  Helpers                                                             //
     // ------------------------------------------------------------------ //
 
     private List<Map<String, Object>> resultSetToList(ResultSet rs, int maxRows) throws SQLException {
@@ -174,8 +110,8 @@ public class DataTools {
         catch (Exception e) { return "{\"error\":\"serialization failed\"}"; }
     }
 
-    private String str(Map<String, Object> m, String key) {
-        Object v = m == null ? null : m.get(key);
+    private String str(Map<String, Object> m) {
+        Object v = m == null ? null : m.get("query");
         return v == null ? null : v.toString();
     }
 
@@ -188,15 +124,10 @@ public class DataTools {
 
     private ToolDefinition def(String name, String description, Map<String, Object> schema) {
         ToolDefinition d = new ToolDefinition();
-        d.name = name; d.description = description; d.inputSchema = schema;
-        return d;
+        d.name = name; d.description = description; d.inputSchema = schema; return d;
     }
 
-    private Map<String, Object> strProp(String desc) {
-        return Map.of("type", "string", "description", desc);
-    }
-
-    private Map<String, Object> intProp(String desc) {
-        return Map.of("type", "integer", "description", desc);
-    }
+    private Map<String, Object> strProp(String desc) { return Map.of("type", "string", "description", desc); }
+    private Map<String, Object> intProp() { return Map.of("type", "integer", "description", "Max rows to return (default: 500, max: 5000)"); }
 }
+

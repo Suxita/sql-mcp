@@ -2,6 +2,7 @@ package ge.tbc.config;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,26 +15,19 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Loads environments.json and resolves ${secret:ENV_VAR} placeholders.
- * Provides a single active environment at any time.
- */
+
 public class EnvironmentRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(EnvironmentRegistry.class);
     private static final Pattern SECRET_PATTERN = Pattern.compile("\\$\\{secret:([^}]+)}");
 
-    // Package-private: allows unit tests to construct an empty registry without
-    // requiring real environment variables (which EnvironmentRegistry.load() needs).
     EnvironmentRegistry() {}
 
     private final Map<String, EnvironmentConfig> environments = new LinkedHashMap<>();
+    @Getter
     private String activeEnvironmentName;
 
-    /**
-     * Load from ENVIRONMENTS_CONFIG_PATH env var, or fall back to
-     * a single environment built from individual SERVER_NAME / DATABASE_NAME vars.
-     */
+
     public static EnvironmentRegistry load() {
         EnvironmentRegistry registry = new EnvironmentRegistry();
 
@@ -46,7 +40,6 @@ public class EnvironmentRegistry {
             }
         }
 
-        // Always register a "default" environment from plain env vars (fallback / convenience)
         String serverName = System.getenv("SERVER_NAME");
         String dbName     = System.getenv("DATABASE_NAME");
         if (serverName != null && dbName != null) {
@@ -54,7 +47,7 @@ public class EnvironmentRegistry {
             def.setName("default");
             def.setServerName(serverName);
             def.setDatabaseName(dbName);
-            def.setAuthMode(coalesce(System.getenv("SQL_AUTH_MODE"), "sql"));
+            def.setAuthMode(coalesce(System.getenv("SQL_AUTH_MODE")));
             def.setUsername(System.getenv("SQL_USERNAME"));
             def.setPassword(System.getenv("SQL_PASSWORD"));
             String port = System.getenv("SQL_PORT");
@@ -88,7 +81,7 @@ public class EnvironmentRegistry {
             register(env);
         }
         if (!list.isEmpty() && activeEnvironmentName == null) {
-            activeEnvironmentName = list.get(0).getName();
+            activeEnvironmentName = list.getFirst().getName();
         }
     }
 
@@ -100,12 +93,12 @@ public class EnvironmentRegistry {
     private String resolveSecret(String value) {
         if (value == null) return null;
         Matcher m = SECRET_PATTERN.matcher(value);
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         while (m.find()) {
             String varName = m.group(1);
             String resolved = System.getenv(varName);
             if (resolved == null) {
-                log.warn("Secret placeholder ${secret:{}} not found in environment variables", varName);
+                log.warn("Secret placeholder ${{secret:{}}} not found in environment variables", varName);
                 resolved = "";
             }
             m.appendReplacement(sb, Matcher.quoteReplacement(resolved));
@@ -138,9 +131,8 @@ public class EnvironmentRegistry {
         log.info("Switched active environment to '{}'", name);
     }
 
-    public String getActiveEnvironmentName() { return activeEnvironmentName; }
-
-    private static String coalesce(String a, String b) {
-        return (a != null && !a.isBlank()) ? a : b;
+    private static String coalesce(String a) {
+        return (a != null && !a.isBlank()) ? a : "sql";
     }
 }
+

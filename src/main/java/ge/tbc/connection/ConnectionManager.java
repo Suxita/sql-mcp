@@ -1,7 +1,5 @@
 package ge.tbc.connection;
 
-
-import ge.tbc.config.EnvironmentConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,32 +8,17 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Properties;
 
-/**
- * Builds JDBC connections from an {@link EnvironmentConfig}.
- * Supports sql, windows, and aad auth modes.
- *
- * <p>This class does NOT pool connections; open a new connection per tool call
- * and close it in a try-with-resources block. For high-throughput scenarios
- * you can drop in HikariCP here without changing the tool layer.</p>
- */
-public class ConnectionManager {
+public record ConnectionManager(ge.tbc.config.EnvironmentConfig config) {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectionManager.class);
 
-    private final EnvironmentConfig config;
-
-    public ConnectionManager(EnvironmentConfig config) {
-        this.config = config;
-    }
-
-    /**
-     * Opens a fresh JDBC connection. Caller must close it.
-     */
     public Connection openConnection() throws SQLException {
         String url = buildJdbcUrl();
         Properties props = buildProperties();
         log.debug("Opening JDBC connection to {} / {}", config.getServerName(), config.getDatabaseName());
-        return DriverManager.getConnection(url, props);
+        Connection conn = DriverManager.getConnection(url, props);
+        conn.setReadOnly(true);
+        return conn;
     }
 
     private String buildJdbcUrl() {
@@ -49,7 +32,7 @@ public class ConnectionManager {
 
         switch (config.getAuthMode().toLowerCase()) {
             case "windows" -> sb.append(";integratedSecurity=true");
-            case "aad"     -> sb.append(";authentication=ActiveDirectoryIntegrated");
+            case "aad" -> sb.append(";authentication=ActiveDirectoryIntegrated");
             // "sql" – credentials go in Properties below
         }
         return sb.toString();
@@ -58,13 +41,12 @@ public class ConnectionManager {
     private Properties buildProperties() {
         Properties p = new Properties();
         if ("sql".equalsIgnoreCase(config.getAuthMode())) {
-            if (config.getUsername() != null) p.setProperty("user",     config.getUsername());
+            if (config.getUsername() != null) p.setProperty("user", config.getUsername());
             if (config.getPassword() != null) p.setProperty("password", config.getPassword());
         }
         return p;
     }
 
-    /** Quick liveness check – used by test_connection tool. */
     public boolean testConnection() {
         try (Connection conn = openConnection()) {
             return conn.isValid(5);
@@ -73,6 +55,5 @@ public class ConnectionManager {
             return false;
         }
     }
-
-    public EnvironmentConfig getConfig() { return config; }
 }
+

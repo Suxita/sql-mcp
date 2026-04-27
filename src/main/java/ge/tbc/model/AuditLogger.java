@@ -1,6 +1,5 @@
 package ge.tbc.model;
 
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
@@ -16,13 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/**
- * Writes JSON Lines audit entries for every tool invocation.
- * Auto-redacts password-like keys to protect credentials in logs.
- *
- * Log path is controlled by the AUDIT_LOG_PATH environment variable.
- * Defaults to mcp-audit.jsonl in the working directory.
- */
+
 public class AuditLogger implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AuditLogger.class);
@@ -34,7 +27,7 @@ public class AuditLogger implements AutoCloseable {
     private final String sessionId = UUID.randomUUID().toString();
 
     public AuditLogger() {
-        String path = coalesce(System.getenv("AUDIT_LOG_PATH"), "mcp-audit.jsonl");
+        String path = coalesce(System.getenv("AUDIT_LOG_PATH"));
         this.mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         PrintWriter w;
         try {
@@ -46,14 +39,6 @@ public class AuditLogger implements AutoCloseable {
         this.writer = w;
     }
 
-    /**
-     * Log a tool invocation.
-     *
-     * @param toolName   name of the tool called
-     * @param arguments  raw arguments map (will be redacted)
-     * @param success    whether the tool succeeded
-     * @param durationMs wall-clock time
-     */
     public void log(String toolName, Map<String, Object> arguments, boolean success, long durationMs) {
         if (writer == null) return;
         try {
@@ -71,16 +56,11 @@ public class AuditLogger implements AutoCloseable {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> redact(Map<String, Object> args) {
         if (args == null) return Map.of();
         Map<String, Object> out = new LinkedHashMap<>();
         for (Map.Entry<String, Object> e : args.entrySet()) {
-            if (SENSITIVE.matcher(e.getKey()).find()) {
-                out.put(e.getKey(), "***REDACTED***");
-            } else {
-                out.put(e.getKey(), e.getValue());
-            }
+            out.put(e.getKey(), SENSITIVE.matcher(e.getKey()).find() ? "***REDACTED***" : e.getValue());
         }
         return out;
     }
@@ -90,7 +70,8 @@ public class AuditLogger implements AutoCloseable {
         if (writer != null) writer.close();
     }
 
-    private static String coalesce(String a, String b) {
-        return (a != null && !a.isBlank()) ? a : b;
+    private static String coalesce(String a) {
+        return (a != null && !a.isBlank()) ? a : "mcp-audit.jsonl";
     }
 }
+
