@@ -15,7 +15,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import org.springframework.stereotype.Component;
 
+@Component
 public class AuditLogger implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AuditLogger.class);

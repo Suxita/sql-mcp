@@ -1,0 +1,21 @@
+spring:
+  ai:
+    mcp:
+      server:
+        name: tbc-mssql-mcp
+        version: 1.0.0
+        instructions: >
+          Read-only MCP server for Microsoft SQL Server.
+          No credentials are stored on the server.
+          Configure connections in your mcp.json using X-Conn-{Name} headers:
+            "X-Conn-Bank2000": "{\"host\":\"q12-sql-01.hq.tbc\",\"port\":2020,\"database\":\"Bank2000\",\"username\":\"USR_Automation\",\"password\":\"...\"}"
+            "X-Conn-CONSSQL":  "{\"host\":\"q12-sql-01.hq.tbc\",\"port\":17155,\"database\":\"CONSSQL\",\"username\":\"USR_Automation\",\"password\":\"...\"}"
+          Tools: read_data (execute SELECT), explain_query (execution plan).
+          Pass the connection name in the tool call, or omit to use the first configured connection.
+
+server:
+  port: 8080
+
+logging:
+  level:
+    ge.tbc: INFO
