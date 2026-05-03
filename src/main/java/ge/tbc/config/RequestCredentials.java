@@ -1,52 +1,55 @@
 package ge.tbc.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import ge.tbc.model.CredentialsFilter;
-import org.springframework.context.annotation.Scope;
-import org.springframework.context.annotation.ScopedProxyMode;
+import ge.tbc.SessionContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.context.WebApplicationContext;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Request-scoped bean that holds the DB connections parsed from X-Conn-* headers.
- * Populated by {@link CredentialsFilter} on every incoming request.
- *
- * Header format:  X-Conn-{EnvName}: {"host":"...","port":2020,"database":"...","username":"...","password":"..."}
- */
 @Component
-@Scope(value = WebApplicationContext.SCOPE_REQUEST, proxyMode = ScopedProxyMode.TARGET_CLASS)
 public class RequestCredentials {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Logger log = LoggerFactory.getLogger(RequestCredentials.class);
 
-    private final Map<String, DbEnvironment> connections = new LinkedHashMap<>();
+    private final ConcurrentHashMap<String, Map<String, DbEnvironment>> sessionStore = new ConcurrentHashMap<>();
 
-    /** Called by {@link CredentialsFilter} — parses the JSON header value and stores it. */
-    public void addFromHeader(String envName, String json) {
-        try {
-            DbEnvironment env = MAPPER.readValue(json, DbEnvironment.class);
-            env.setName(envName);
-            connections.put(envName, env);
-        } catch (Exception e) {
-            // malformed header — skip silently, tool will return a clear error
-        }
+    public void store(String sessionId, Map<String, DbEnvironment> connections) {
+        if (sessionId == null || connections == null || connections.isEmpty()) return;
+        sessionStore.put(sessionId, Collections.unmodifiableMap(new LinkedHashMap<>(connections)));
+        log.debug("Stored {} connection(s) for session {}", connections.size(), sessionId);
     }
 
-    /** Returns the connection config for the named environment, or null if not present. */
     public DbEnvironment get(String envName) {
-        return connections.get(envName);
+        if (envName == null || envName.isBlank()) return getDefault();
+        Map<String, DbEnvironment> conns = current();
+        DbEnvironment direct = conns.get(envName);
+        if (direct != null) return direct;
+        return conns.entrySet().stream()
+                .filter(e -> e.getKey().equalsIgnoreCase(envName))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
     }
 
-    /** Returns the first connection if available (used as the default). */
     public DbEnvironment getDefault() {
-        return connections.isEmpty() ? null : connections.values().iterator().next();
+        Map<String, DbEnvironment> conns = current();
+        return conns.isEmpty() ? null : conns.values().iterator().next();
     }
 
     public Map<String, DbEnvironment> getAll() {
-        return Collections.unmodifiableMap(connections);
+        return current();
+    }
+
+    private Map<String, DbEnvironment> current() {
+        String sessionId = SessionContext.SESSION_ID.get();
+        log.debug("current() – sessionId={}, knownSessions={}", sessionId, sessionStore.keySet());
+        if (sessionId != null) {
+            Map<String, DbEnvironment> conns = sessionStore.get(sessionId);
+            if (conns != null) return conns;
+        }
+        return sessionStore.isEmpty() ? Collections.emptyMap()
+                : sessionStore.values().iterator().next();
     }
 }

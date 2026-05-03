@@ -15,10 +15,6 @@ public class ConnectionManager {
 
     private ConnectionManager() {}
 
-    /**
-     * Opens a read-only JDBC connection from a {@link DbEnvironment}
-     * that was parsed directly from the caller's request header.
-     */
     public static Connection open(DbEnvironment env) throws SQLException {
         String url = "jdbc:sqlserver://" + env.getHost() + ":" + env.getPort()
                 + ";databaseName=" + env.getDatabase()
@@ -29,8 +25,7 @@ public class ConnectionManager {
         props.setProperty("user",     env.getUsername());
         props.setProperty("password", env.getPassword());
 
-        log.debug("Connecting → {}/{}@{}:{}", env.getUsername(),
-                env.getDatabase(), env.getHost(), env.getPort());
+        log.debug("Connecting to {}/{}@{}:{}", env.getUsername(), env.getDatabase(), env.getHost(), env.getPort());
 
         Connection conn = DriverManager.getConnection(url, props);
         conn.setReadOnly(true);

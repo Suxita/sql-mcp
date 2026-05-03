@@ -4,67 +4,42 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.BufferedWriter;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.UUID;
-import java.util.regex.Pattern;
-
 import org.springframework.stereotype.Component;
+
+import java.io.*;
+import java.time.Instant;
+import java.util.*;
+import java.util.regex.Pattern;
 
 @Component
 public class AuditLogger implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AuditLogger.class);
-    private static final Pattern SENSITIVE = Pattern.compile(
-            "(?i)(password|secret|token|key|credential|auth)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SENSITIVE = Pattern.compile("(?i)(password|secret|token|key|credential|auth)");
+    private static final ObjectMapper MAPPER = new ObjectMapper().registerModule(new JavaTimeModule());
 
-    private final ObjectMapper mapper;
     private final PrintWriter writer;
     private final String sessionId = UUID.randomUUID().toString();
 
     public AuditLogger() {
-        String path = coalesce(System.getenv("AUDIT_LOG_PATH"));
-        this.mapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        PrintWriter w;
-        try {
-            w = new PrintWriter(new BufferedWriter(new FileWriter(path, true)));
-        } catch (IOException e) {
-            log.warn("Cannot open audit log '{}': {}. Audit logging disabled.", path, e.getMessage());
-            w = null;
-        }
-        this.writer = w;
+        this.writer = openWriter(resolveLogPath());
     }
 
-    public void log(String toolName, Map<String, Object> arguments, boolean success, long durationMs) {
+    public void log(String tool, Map<String, Object> args, boolean success, long durationMs) {
         if (writer == null) return;
         try {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("sessionId",  sessionId);
             entry.put("timestamp",  Instant.now().toString());
-            entry.put("tool",       toolName);
-            entry.put("arguments",  redact(arguments));
+            entry.put("tool",       tool);
+            entry.put("arguments",  redact(args));
             entry.put("success",    success);
             entry.put("durationMs", durationMs);
-            writer.println(mapper.writeValueAsString(entry));
+            writer.println(MAPPER.writeValueAsString(entry));
             writer.flush();
         } catch (Exception e) {
             log.warn("Audit write failed: {}", e.getMessage());
         }
-    }
-
-    private Map<String, Object> redact(Map<String, Object> args) {
-        if (args == null) return Map.of();
-        Map<String, Object> out = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> e : args.entrySet()) {
-            out.put(e.getKey(), SENSITIVE.matcher(e.getKey()).find() ? "***REDACTED***" : e.getValue());
-        }
-        return out;
     }
 
     @Override
@@ -72,8 +47,24 @@ public class AuditLogger implements AutoCloseable {
         if (writer != null) writer.close();
     }
 
-    private static String coalesce(String a) {
-        return (a != null && !a.isBlank()) ? a : "mcp-audit.jsonl";
+    private Map<String, Object> redact(Map<String, Object> args) {
+        if (args == null) return Map.of();
+        Map<String, Object> out = new LinkedHashMap<>();
+        args.forEach((k, v) -> out.put(k, SENSITIVE.matcher(k).find() ? "***" : v));
+        return out;
+    }
+
+    private static PrintWriter openWriter(String path) {
+        try {
+            return new PrintWriter(new BufferedWriter(new FileWriter(path, true)));
+        } catch (IOException e) {
+            log.warn("Cannot open audit log '{}': {}. Audit logging disabled.", path, e.getMessage());
+            return null;
+        }
+    }
+
+    private static String resolveLogPath() {
+        String path = System.getenv("AUDIT_LOG_PATH");
+        return (path != null && !path.isBlank()) ? path : "mcp-audit.jsonl";
     }
 }
-

@@ -1,29 +1,24 @@
 package ge.tbc.model;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import ge.tbc.SessionContext;
+import ge.tbc.config.DbEnvironment;
 import ge.tbc.config.RequestCredentials;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.util.*;
 
-/**
- * Reads every X-Conn-{EnvName} header from the request and loads it into
- * the request-scoped {@link RequestCredentials} bean.
- *
- * End users add this to their mcp.json:
- * <pre>
- * "headers": {
- *   "X-Conn-Bank2000": "{\"host\":\"q12-sql-01.hq.tbc\",\"port\":2020,\"database\":\"Bank2000\",\"username\":\"USR_Automation\",\"password\":\"...\"}",
- *   "X-Conn-CONSSQL":  "{\"host\":\"q12-sql-01.hq.tbc\",\"port\":17155,\"database\":\"CONSSQL\",\"username\":\"USR_Automation\",\"password\":\"...\"}"
- * }
- * </pre>
- */
 @Component
 public class CredentialsFilter implements Filter {
 
-    private static final String PREFIX = "x-conn-";
+    private static final Logger log = LoggerFactory.getLogger(CredentialsFilter.class);
+    private static final String HEADER_PREFIX = "x-conn-";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final RequestCredentials credentials;
 
@@ -34,17 +29,34 @@ public class CredentialsFilter implements Filter {
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
-
         HttpServletRequest http = (HttpServletRequest) request;
+        String sessionId = http.getHeader("mcp-session-id");
+        SessionContext.SESSION_ID.set(sessionId);
+        try {
+            credentials.store(sessionId, parseConnHeaders(http));
+            chain.doFilter(request, response);
+        } finally {
+            SessionContext.SESSION_ID.remove();
+        }
+    }
 
-        Collections.list(http.getHeaderNames()).forEach(name -> {
-            if (name.toLowerCase().startsWith(PREFIX)) {
-                String envName = name.substring(PREFIX.length()); // e.g. "Bank2000"
-                String json    = http.getHeader(name);
-                credentials.addFromHeader(envName, json);
-            }
-        });
+    private Map<String, DbEnvironment> parseConnHeaders(HttpServletRequest http) {
+        Map<String, DbEnvironment> result = new LinkedHashMap<>();
+        Collections.list(http.getHeaderNames()).stream()
+                .filter(name -> name.toLowerCase().startsWith(HEADER_PREFIX))
+                .forEach(name -> parseHeader(name, http.getHeader(name), result));
+        log.debug("{} {} – parsed {} X-Conn header(s)", http.getMethod(), http.getRequestURI(), result.size());
+        return result;
+    }
 
-        chain.doFilter(request, response);
+    private void parseHeader(String name, String json, Map<String, DbEnvironment> target) {
+        String envName = name.substring(HEADER_PREFIX.length());
+        try {
+            DbEnvironment env = MAPPER.readValue(json, DbEnvironment.class);
+            env.setName(envName);
+            target.put(envName, env);
+        } catch (Exception e) {
+            log.warn("Failed to parse X-Conn-{}: {}", envName, e.getMessage());
+        }
     }
 }
